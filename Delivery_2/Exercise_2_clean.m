@@ -1,5 +1,5 @@
 %%
-establishConnection()
+establishConnection(true)
 %%
 % Making objects for subscribing and publishing the topics
 robot = rospublisher('/mobile_base/commands/velocity') ;
