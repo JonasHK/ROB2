@@ -1,7 +1,7 @@
 clear, close all;
 % Defines:
 Robot_width = 0.4; % SI: m
-Map_pixel_m_resolution = 35;
+Map_pixel_m_resolution = 34.36;
 margin = 0.10;
 % Destinations
 A = [100, 580];
@@ -38,8 +38,29 @@ hold on, plot(A(1), A(2), 'r*'), text(A(1), A(2), 'A')
 hold on, plot(B(1), B(2), 'r*'), text(B(1), B(2), 'B')
 
 prm = PRM(im_binary_dilated)
-prm.plan('npoints', 200)  % planning
+prm.plan('npoints', 300)  % planning
 prm.plot() 
 
-prm.query(A, B)
+path = prm.query(A, B) % waypoints
 prm.plot()
+%% Pure persuit
+controller = controllerPurePursuit('DesiredLinearVelocity',0.3,'LookaheadDistance',0.3,'MaxAngularVelocity',4,'Waypoints',path);
+
+while(1)
+     % Position update
+        pose = getPose(odom);
+        % Convert orientation
+        quat = pose.Orientation;
+        angles = quat2eul([quat.W quat.X quat.Y quat.Z]);
+        % Calculation distance to goal
+        distanceToGoal1 = norm([pose.Position.X;pose.Position.Y]-goal1);
+        % Asking controller 1 for linear velocity and angular velocity
+        [vel,ang_vel] = controller1([pose.Position.X, pose.Position.Y, angles(1)]);
+        % Tells the robot to move
+        move(vel,ang_vel,robot);
+        % Logging data and incrementing index
+        logarray(index,1) = pose.Position.X;
+        logarray(index,2) = pose.Position.Y;
+        index = index + 1
+end
+
