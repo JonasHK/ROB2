@@ -16,6 +16,7 @@ laserSub = rossubscriber('/scan');
 odomSub = rossubscriber('/odom');
 [velPub,velMsg] = rospublisher('/mobile_base/commands/velocity','geometry_msgs/Twist');
 numUpdates = 60; % antal updateringer til monte carlo, inden start
+startup_rvc
 %%
 % Loading occupancy map of Shannon
 % Load Color Image
@@ -48,6 +49,7 @@ map = binaryOccupancyMap(im_binary_dilated,Map_pixel_m_resolution);
 map_without_dilate = binaryOccupancyMap(im_binary,Map_pixel_m_resolution);
 figure(), show(map)
 %% Matlab PRM - better than Corke
+close all
 prmComplex = mobileRobotPRM(map,400);
 show(prmComplex)
 path = findpath(prmComplex,A,B);
@@ -114,10 +116,12 @@ visualizationHelper = ExampleHelperAMCLVisualization(map_without_dilate); % Star
 
 %% Pure persuit
 controller = controllerPurePursuit('DesiredLinearVelocity',0.5,'LookaheadDistance',0.4,'MaxAngularVelocity',2,'Waypoints',path);
-amcl.InitialPose = ExampleHelperAMCLGazeboTruePose 
+amcl.InitialPose = ExampleHelperAMCLGazeboTruePose;
 i = 0;
+% Instantiate vector field histogram
+
 while(1)
-    tik
+    %tic
     % Receive laser scan and odometry message.
     scanMsg = receive(laserSub);
     odompose = odomSub.LatestMessage;
@@ -129,7 +133,10 @@ while(1)
     odomQuat = [odompose.Pose.Pose.Orientation.W, odompose.Pose.Pose.Orientation.X, ...
         odompose.Pose.Pose.Orientation.Y, odompose.Pose.Pose.Orientation.Z];
     odomRotation = quat2eul(odomQuat);
-    pose = [odompose.Pose.Pose.Position.X + amcl.InitialPose(1), odompose.Pose.Pose.Position.Y + amcl.InitialPose(2), odomRotation(1) + amcl.InitialPose(3)];
+  
+
+    
+    pose = [odompose.Pose.Pose.Position.X + amcl.InitialPose(1), odompose.Pose.Pose.Position.Y + amcl.InitialPose(2), odomRotation(1)];
     % Update estimated robot's pose and covariance using new odometry and
     % sensor readings.
     [isUpdated,estimatedPose, estimatedCovariance] = amcl(pose, scan);
@@ -147,6 +154,27 @@ while(1)
     logarray(index,3) = estimatedPose(3)-odomRotation(1) + amcl.InitialPose(3);
     index = index + 1;
     
+    %if(objekt deteced)
+    %    gemmer orientering
+    %    map loades
+    %    bug 2 på den
+    %    kører efter bug'en
+    %    ExampleHelperAMCLGazeboTruePose
+    
+    
+    ObDis = mean(scan.Ranges(300:340))
+    if(isnan(ObDis) == 0  && ObDis<0.5)
+         Rotation_old = estimatedPose(3);
+         obsMap = zeros(round(2*Map_pixel_m_resolution));
+         obsMap(round(0.5*Map_pixel_m_resolution):round(1.5*Map_pixel_m_resolution),round(0.5*Map_pixel_m_resolution):round(1.5*Map_pixel_m_resolution)) = 1;
+         imagesc(obsMap)
+         obsStart = [round(1*Map_pixel_m_resolution),round(0.45*Map_pixel_m_resolution)];
+         obsGoal = [round(1*Map_pixel_m_resolution)+1,round(1.55*Map_pixel_m_resolution)];
+         bug = Bug2(obsMap);
+         bug.goal=obsGoal;
+         bug.query(obsStart,obsGoal,'animate')
+    end
+    
      %disp (pose(1))
     %pause(1)
     
@@ -155,7 +183,7 @@ while(1)
         i = i + 1;
         plotStep(visualizationHelper, amcl, estimatedPose, scan, i)
     end
-    tok
+    %toc
 end
 
 % %% Pure persuit
