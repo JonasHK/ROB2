@@ -118,7 +118,7 @@ visualizationHelper = ExampleHelperAMCLVisualization(map_without_dilate); % Star
 controller = controllerPurePursuit('DesiredLinearVelocity',0.5,'LookaheadDistance',0.4,'MaxAngularVelocity',2,'Waypoints',path);
 amcl.InitialPose = ExampleHelperAMCLGazeboTruePose;
 i = 0;
-% Instantiate vector field histogram
+% Instantiate vector field histograms
 
 while(1)
     %tic
@@ -161,19 +161,53 @@ while(1)
     %    kører efter bug'en
     %    ExampleHelperAMCLGazeboTruePose
     
-    
-    ObDis = mean(scan.Ranges(300:340))
-    if(isnan(ObDis) == 0  && ObDis<0.5)
-         Rotation_old = estimatedPose(3);
-         obsMap = zeros(round(2*Map_pixel_m_resolution));
-         obsMap(round(0.5*Map_pixel_m_resolution):round(1.5*Map_pixel_m_resolution),round(0.5*Map_pixel_m_resolution):round(1.5*Map_pixel_m_resolution)) = 1;
-         imagesc(obsMap)
-         obsStart = [round(1*Map_pixel_m_resolution),round(0.45*Map_pixel_m_resolution)];
-         obsGoal = [round(1*Map_pixel_m_resolution)+1,round(1.55*Map_pixel_m_resolution)];
-         bug = Bug2(obsMap);
-         bug.goal=obsGoal;
-         bug.query(obsStart,obsGoal,'animate')
+    ObDis = mean(scan.Ranges(300:340));
+    if(~isnan(ObDis)  && ObDis<0.5)
+        pause(2);
+        while(mean(scan.Ranges(300:340))<0.5 || mean(scan.Ranges(90:100))<0.5 || mean(scan.Ranges(515:525))<0.5)
+            if (~isnan(ObDis) && ObDis<0.5)
+                ObDisLeft = mean(scan.Ranges(620:640)); 
+                ObDisRight = mean(scan.Ranges(1:21));
+                % If NaNs are detected mean returns NaN.
+                % If NaNs to the right and to the left, prefer going left
+                ObDisLeft(isnan(ObDisLeft)) = 15;
+                ObDisRight(isnan(ObDisRight)) = 14;
+                if(ObDisLeft>ObDisRight)
+                    turningFactor = -1;
+                else
+                    turningFactor = 1;
+                end
+            end
+            rotateDegree2(90*turningFactor,0.3,false,odomSub,velPub);
+             for i = 1:9
+                move(0.2,0,velPub);
+                pause(0.5);
+            end
+            rotateDegree2(-90*turningFactor,0.3,false,odomSub,velPub);
+            % Takes a new scan
+            scanMsg = receive(laserSub); scan = lidarScan(scanMsg);
+        end
+        for i = 1:9
+            move(0.2,0,velPub);
+            pause(0.5);
+        end
+            rotateDegree2(-90*turningFactor,0.3,false,odomSub,velPub);
+            
+   
     end
+%     
+%     ObDis = mean(scan.Ranges(300:340))
+%     if(isnan(ObDis) == 0  && ObDis<0.5)
+%          Rotation_old = estimatedPose(3);
+%          obsMap = zeros(round(2*Map_pixel_m_resolution));
+%          obsMap(round(0.5*Map_pixel_m_resolution):round(1.5*Map_pixel_m_resolution),round(0.5*Map_pixel_m_resolution):round(1.5*Map_pixel_m_resolution)) = 1;
+%          imagesc(obsMap)
+%          obsStart = [round(1*Map_pixel_m_resolution),round(0.45*Map_pixel_m_resolution)];
+%          obsGoal = [round(1*Map_pixel_m_resolution)+1,round(1.55*Map_pixel_m_resolution)];
+%          bug = Bug2(obsMap);
+%          bug.goal=obsGoal;
+%          bug.query(obsStart,obsGoal,'animate')
+%     end
     
      %disp (pose(1))
     %pause(1)
@@ -207,4 +241,97 @@ end
 %         logarray(index,2) = pose.Position.Y + amcl.InitialPose(2);
 %         index = index + 1
 % end
-
+%%
+stillInFrontFlag = false;
+offsetcounter = 0;
+midRange = 0.7;
+sideRange = 0.8;
+while(1)
+    move(0.2,0,velPub);
+    % Takes a new scan
+    scanMsg = receive(laserSub); scan = lidarScan(scanMsg);
+    figure(1);
+    plot(scan);
+    ObDis = mean(scan.Ranges(318:322));
+    if((~isnan(ObDis)  && ObDis<midRange) || mean(scan.Ranges(90:100))<sideRange|| mean(scan.Ranges(515:525))<sideRange)
+        stillInFrontFlag = true;
+        disp('In If');
+        pause(2);
+        % Takes a new scan
+        scanMsg = receive(laserSub); scan = lidarScan(scanMsg);
+        ObDis = mean(scan.Ranges(318:322));
+        while(offsetcounter ~= 0 || stillInFrontFlag == true)
+            while(mean(scan.Ranges(318:322))<midRange || mean(scan.Ranges(90:100))<sideRange || mean(scan.Ranges(515:525))<sideRange)
+                disp('In while');
+                if (~isnan(ObDis) && ObDis<midRange)
+                    disp('In if2');
+                    ObDisLeft = mean(scan.Ranges(620:640)); 
+                    ObDisRight = mean(scan.Ranges(1:21));
+                    figure(2); plot(scan);
+                    % If NaNs are detected mean returns NaN.
+                    % If NaNs to the right and to the left, prefer going left
+                    ObDisLeft(isnan(ObDisLeft)) = 15;
+                    ObDisRight(isnan(ObDisRight)) = 14;
+                    if(ObDisLeft>ObDisRight)
+                        turningFactor = 1;
+                        offsetcounter = offsetcounter -1;
+                        disp(turningFactor);
+                    else
+                        turningFactor = -1;
+                        offsetcounter = offsetcounter +1;
+                        disp(turningFactor);
+                    end
+                end
+                rotateDegree2(90*turningFactor,0.3*turningFactor,false,odomSub,velPub);
+                 for i = 1:2
+                    move(0.2,0,velPub);
+                    pause(0.5);
+                end
+                rotateDegree2(-90*turningFactor,-0.3*turningFactor,false,odomSub,velPub);
+                % Takes a new scan
+                scanMsg = receive(laserSub); scan = lidarScan(scanMsg);
+            end
+            stillInFrontFlag = false;
+            
+            
+            % Now, maybe parallel with the object
+            while(offsetcounter ~= 0 && stillInFrontFlag == false)
+                disp('In while offsetCounter~=0');
+                disp(offsetcounter);
+                % Takes a new scan
+                scanMsg = receive(laserSub); scan = lidarScan(scanMsg);
+                if(~(mean(scan.Ranges(318:322))<midRange || mean(scan.Ranges(90:100))<sideRange || mean(scan.Ranges(515:525))<sideRange))
+                    disp('In move parallel');
+                    stillInFrontFlag = false;
+                    % Drives forward
+                    for i = 1:5
+                            move(0.2,0,velPub);
+                            pause(0.5);
+                    end
+                    rotateDegree2(-90*turningFactor,-0.3*turningFactor,false,odomSub,velPub);
+                    % Takes a new scan
+                     scanMsg = receive(laserSub); scan = lidarScan(scanMsg);
+                     if(mean(scan.Ranges(318:322))<midRange || mean(scan.Ranges(90:100))<sideRange || mean(scan.Ranges(515:525))<sideRange)
+                         disp('Not behind');
+                         rotateDegree2(90*turningFactor,0.3*turningFactor,false,odomSub,velPub);
+                     else
+                         disp('maybe behind');
+                         while(offsetcounter ~= 0 && ~(mean(scan.Ranges(318:322))<midRange || mean(scan.Ranges(90:100))<sideRange || mean(scan.Ranges(515:525))<sideRange))
+                             for i = 1:2
+                                move(0.2,0,velPub);
+                                pause(0.5);
+                             end
+                             % Takes a new scan
+                            scanMsg = receive(laserSub); scan = lidarScan(scanMsg);
+                            offsetcounter = offsetcounter + turningFactor;
+                            disp(offsetcounter);
+                         end
+                        rotateDegree2(90*turningFactor,0.3*turningFactor,false,odomSub,velPub);
+                     end
+                else
+                    stillInFrontFlag = true;
+                end
+            end
+        end
+    end
+end
