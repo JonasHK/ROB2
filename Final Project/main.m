@@ -2,21 +2,21 @@ rosshutdown, clear, close all, clc;
 % Defines:
 Robot_width = 0.8; % SI: m
 Map_pixel_m_resolution = (2445-8)/53.5;
-margin = 0.10;
+margin = 0.30;
+monteCarlCounter = 0;
 % Destinations
-A = [46, 27.5];
-B = [2, 13];
+A = [6.5,23.4] %[46, 27.5];
+B = [2, 9];
 C = [40, 40];
-establishConnection('1.164', '1.145');
+establishConnection('0.11', '0.19');
 % Making objects for subscribing and publishing the topics
-robot = rospublisher('/mobile_base/commands/velocity') ;
 odom = rossubscriber('/odom');
 resetOdometry = rospublisher('/mobile_base/commands/reset_odometry');
 laserSub = rossubscriber('/scan');
 odomSub = rossubscriber('/odom');
+imSub = rossubscriber('/camera/rgb/image_raw');
 [velPub,velMsg] = rospublisher('/mobile_base/commands/velocity','geometry_msgs/Twist');
-numUpdates = 60; % antal updateringer til monte carlo, inden start
-startup_rvc
+%startup_rvc
 %%
 % Loading occupancy map of Shannon
 % Load Color Image
@@ -26,7 +26,7 @@ startup_rvc
 % Convert to Grayscale
 %map_bw = rgb2gray(map_color);
 map_bw = imread('shannonMap.tif');
-figure(1), imshow(map_bw)
+%figure(1), imshow(map_bw)
 
 % Calculating Mean Pixel Value
 mean_value = mean(map_bw(:));
@@ -38,21 +38,22 @@ im_binary = rot90(im_binary,3);
 %figure(), imshow(im_binary)
 im_binary = flip(im_binary);
 im_binary = fliplr(im_binary);
-figure(), imshow(im_binary)
+%figure(), imshow(im_binary)
 % Making dilation on walls
 SE = ones(round(((Robot_width/2)+margin)*Map_pixel_m_resolution));
 im_binary_dilated = imdilate(im_binary,SE);
-figure(), imshow(im_binary_dilated)
+%figure(), imshow(im_binary_dilated)
 % Invert binary
 
 map = binaryOccupancyMap(im_binary_dilated,Map_pixel_m_resolution);
 map_without_dilate = binaryOccupancyMap(im_binary,Map_pixel_m_resolution);
-figure(), show(map)
+%figure(), show(map)
 %% Matlab PRM - better than Corke
 close all
-prmComplex = mobileRobotPRM(map,400);
-show(prmComplex)
+prmComplex = mobileRobotPRM(map,350);
+%show(prmComplex)
 path = findpath(prmComplex,A,B);
+figure(10)
 show(prmComplex)
 %% PRM - Corke
 %Add probabilistic roadmapping
@@ -76,12 +77,12 @@ send(resetOdometry,reset_msg);
 pause(2)
 
 %amcl.release()
-numUpdates = 20;
+
 % Creating array for logging the position of the robots movement - from
 % its perspective 
 logarray = zeros(100,3); %(pure persuit)
 index = 1;
-% Monte Carlo
+%% Monte Carlo - 
 odometryModel = odometryMotionModel;
 odometryModel.Noise = [0.2 0.2 0.2 0.2];
 rangeFinderModel = likelihoodFieldSensorModel;
@@ -113,15 +114,22 @@ amcl.InitialPose = ExampleHelperAMCLGazeboTruePose
 amcl.InitialCovariance = eye(3)*0.5;
 visualizationHelper = ExampleHelperAMCLVisualization(map_without_dilate); % Start a figure for amcl to print points in. PlotStep() later.
 %wanderHelper = ExampleHelperAMCLWanderer(laserSub, sensorTransform, velPub, velMsg);
-
 %% Pure persuit
-controller = controllerPurePursuit('DesiredLinearVelocity',0.5,'LookaheadDistance',0.4,'MaxAngularVelocity',2,'Waypoints',path);
-amcl.InitialPose = ExampleHelperAMCLGazeboTruePose;
+controller = controllerPurePursuit('DesiredLinearVelocity',0.3,'LookaheadDistance',0.4,'MaxAngularVelocity',2,'Waypoints',path);
+amcl = monteCarloInit(map_without_dilate);
+visualizationHelper = ExampleHelperAMCLVisualization(map_without_dilate); % Start a figure for amcl to print points in. PlotStep() later.
+%amcl.InitialPose = ExampleHelperAMCLGazeboTruePose;
 i = 0;
 % Instantiate vector field histograms
 
-while(1)
-    %tic
+% Set goal radius
+goalRadius = 0.1;
+robotInitialLocation = [amcl.InitialPose(1), amcl.InitialPose(2)];
+robotGoal = B;
+distanceToGoal = norm(robotInitialLocation - robotGoal);
+
+while(distanceToGoal > goalRadius)
+    
     % Receive laser scan and odometry message.
     scanMsg = receive(laserSub);
     odompose = odomSub.LatestMessage;
@@ -140,85 +148,55 @@ while(1)
     % Update estimated robot's pose and covariance using new odometry and
     % sensor readings.
     [isUpdated,estimatedPose, estimatedCovariance] = amcl(pose, scan);
-
+	
+	% Scanning and avoiding objects
+	
+	objectAvoided = avoidObject(laserSub,odomSub,velPub,scan);
+	if(~objectAvoided)
+		monteCarlCounter = monteCarlCounter + 1;
+	else
+		%Starts a new montocarlo
+		amcl = monteCarloInit(map_without_dilate);
+		monteCarlCounter = 0;
+	end
+	
     % Calculation distance to goal
     %distanceToGoal1 = norm([pose.Position.X;pose.Position.Y]-B);
     % Asking controller 1 for linear velocity and angular velocity
     [vel,ang_vel] = controller([estimatedPose(1), estimatedPose(2), estimatedPose(3)]);
     % Tells the robot to move
     %disp(angles)
-    move(vel,ang_vel,robot);
+    move(vel,ang_vel,velPub);
     % Logging data and incrementing index
     logarray(index,1) = estimatedPose(1)-odompose.Pose.Pose.Position.X + amcl.InitialPose(1);
     logarray(index,2) = estimatedPose(2)-odompose.Pose.Pose.Position.Y + amcl.InitialPose(2);
     logarray(index,3) = estimatedPose(3)-odomRotation(1) + amcl.InitialPose(3);
     index = index + 1;
+
     
-    %if(objekt deteced)
-    %    gemmer orientering
-    %    map loades
-    %    bug 2 på den
-    %    kører efter bug'en
-    %    ExampleHelperAMCLGazeboTruePose
-    
-    ObDis = mean(scan.Ranges(300:340));
-    if(~isnan(ObDis)  && ObDis<0.5)
-        pause(2);
-        while(mean(scan.Ranges(300:340))<0.5 || mean(scan.Ranges(90:100))<0.5 || mean(scan.Ranges(515:525))<0.5)
-            if (~isnan(ObDis) && ObDis<0.5)
-                ObDisLeft = mean(scan.Ranges(620:640)); 
-                ObDisRight = mean(scan.Ranges(1:21));
-                % If NaNs are detected mean returns NaN.
-                % If NaNs to the right and to the left, prefer going left
-                ObDisLeft(isnan(ObDisLeft)) = 15;
-                ObDisRight(isnan(ObDisRight)) = 14;
-                if(ObDisLeft>ObDisRight)
-                    turningFactor = -1;
-                else
-                    turningFactor = 1;
-                end
-            end
-            rotateDegree2(90*turningFactor,0.3,false,odomSub,velPub);
-             for i = 1:9
-                move(0.2,0,velPub);
-                pause(0.5);
-            end
-            rotateDegree2(-90*turningFactor,0.3,false,odomSub,velPub);
-            % Takes a new scan
-            scanMsg = receive(laserSub); scan = lidarScan(scanMsg);
-        end
-        for i = 1:9
-            move(0.2,0,velPub);
-            pause(0.5);
-        end
-            rotateDegree2(-90*turningFactor,0.3,false,odomSub,velPub);
-            
-   
-    end
-%     
-%     ObDis = mean(scan.Ranges(300:340))
-%     if(isnan(ObDis) == 0  && ObDis<0.5)
-%          Rotation_old = estimatedPose(3);
-%          obsMap = zeros(round(2*Map_pixel_m_resolution));
-%          obsMap(round(0.5*Map_pixel_m_resolution):round(1.5*Map_pixel_m_resolution),round(0.5*Map_pixel_m_resolution):round(1.5*Map_pixel_m_resolution)) = 1;
-%          imagesc(obsMap)
-%          obsStart = [round(1*Map_pixel_m_resolution),round(0.45*Map_pixel_m_resolution)];
-%          obsGoal = [round(1*Map_pixel_m_resolution)+1,round(1.55*Map_pixel_m_resolution)];
-%          bug = Bug2(obsMap);
-%          bug.goal=obsGoal;
-%          bug.query(obsStart,obsGoal,'animate')
-%     end
-    
-     %disp (pose(1))
+    %disp (pose(1))
     %pause(1)
     
     % Plot the robot's estimated pose, particles and laser scans on the map.
-    if isUpdated
-        i = i + 1;
-        plotStep(visualizationHelper, amcl, estimatedPose, scan, i)
-    end
-    %toc
+	if (isUpdated && monteCarlCounter > 3)
+         i = i + 1;
+         plotStep(visualizationHelper, amcl, estimatedPose, scan, i)
+	end
+	
+	distanceToGoal = norm(robotInitialLocation - robotGoal);
 end
+
+%% Find first green circle
+spinToLocateGreenCircle(12, imSub, odomSub, velPub);
+
+allignGreenCircle(12, 3, imSub, odomSub, velPub);
+
+aoa = driveTowardsGreenCircle(laserSub, velPub, odomSub);
+
+allignGreenCircle(4, 1, imSub, odomSub, velPub);
+
+allignToWall(laserSub, odomSub, velPub);
+
 
 % %% Pure persuit
 % controller = controllerPurePursuit('DesiredLinearVelocity',0.5,'LookaheadDistance',0.4,'MaxAngularVelocity',2,'Waypoints',path);
@@ -241,97 +219,10 @@ end
 %         logarray(index,2) = pose.Position.Y + amcl.InitialPose(2);
 %         index = index + 1
 % end
-%%
-stillInFrontFlag = false;
-offsetcounter = 0;
-midRange = 0.7;
-sideRange = 0.8;
+%% % MOved it to a function
+
 while(1)
-    move(0.2,0,velPub);
-    % Takes a new scan
-    scanMsg = receive(laserSub); scan = lidarScan(scanMsg);
-    figure(1);
-    plot(scan);
-    ObDis = mean(scan.Ranges(318:322));
-    if((~isnan(ObDis)  && ObDis<midRange) || mean(scan.Ranges(90:100))<sideRange|| mean(scan.Ranges(515:525))<sideRange)
-        stillInFrontFlag = true;
-        disp('In If');
-        pause(2);
-        % Takes a new scan
-        scanMsg = receive(laserSub); scan = lidarScan(scanMsg);
-        ObDis = mean(scan.Ranges(318:322));
-        while(offsetcounter ~= 0 || stillInFrontFlag == true)
-            while(mean(scan.Ranges(318:322))<midRange || mean(scan.Ranges(90:100))<sideRange || mean(scan.Ranges(515:525))<sideRange)
-                disp('In while');
-                if (~isnan(ObDis) && ObDis<midRange)
-                    disp('In if2');
-                    ObDisLeft = mean(scan.Ranges(620:640)); 
-                    ObDisRight = mean(scan.Ranges(1:21));
-                    figure(2); plot(scan);
-                    % If NaNs are detected mean returns NaN.
-                    % If NaNs to the right and to the left, prefer going left
-                    ObDisLeft(isnan(ObDisLeft)) = 15;
-                    ObDisRight(isnan(ObDisRight)) = 14;
-                    if(ObDisLeft>ObDisRight)
-                        turningFactor = 1;
-                        offsetcounter = offsetcounter -1;
-                        disp(turningFactor);
-                    else
-                        turningFactor = -1;
-                        offsetcounter = offsetcounter +1;
-                        disp(turningFactor);
-                    end
-                end
-                rotateDegree2(90*turningFactor,0.3*turningFactor,false,odomSub,velPub);
-                 for i = 1:2
-                    move(0.2,0,velPub);
-                    pause(0.5);
-                end
-                rotateDegree2(-90*turningFactor,-0.3*turningFactor,false,odomSub,velPub);
-                % Takes a new scan
-                scanMsg = receive(laserSub); scan = lidarScan(scanMsg);
-            end
-            stillInFrontFlag = false;
-            
-            
-            % Now, maybe parallel with the object
-            while(offsetcounter ~= 0 && stillInFrontFlag == false)
-                disp('In while offsetCounter~=0');
-                disp(offsetcounter);
-                % Takes a new scan
-                scanMsg = receive(laserSub); scan = lidarScan(scanMsg);
-                if(~(mean(scan.Ranges(318:322))<midRange || mean(scan.Ranges(90:100))<sideRange || mean(scan.Ranges(515:525))<sideRange))
-                    disp('In move parallel');
-                    stillInFrontFlag = false;
-                    % Drives forward
-                    for i = 1:5
-                            move(0.2,0,velPub);
-                            pause(0.5);
-                    end
-                    rotateDegree2(-90*turningFactor,-0.3*turningFactor,false,odomSub,velPub);
-                    % Takes a new scan
-                     scanMsg = receive(laserSub); scan = lidarScan(scanMsg);
-                     if(mean(scan.Ranges(318:322))<midRange || mean(scan.Ranges(90:100))<sideRange || mean(scan.Ranges(515:525))<sideRange)
-                         disp('Not behind');
-                         rotateDegree2(90*turningFactor,0.3*turningFactor,false,odomSub,velPub);
-                     else
-                         disp('maybe behind');
-                         while(offsetcounter ~= 0 && ~(mean(scan.Ranges(318:322))<midRange || mean(scan.Ranges(90:100))<sideRange || mean(scan.Ranges(515:525))<sideRange))
-                             for i = 1:2
-                                move(0.2,0,velPub);
-                                pause(0.5);
-                             end
-                             % Takes a new scan
-                            scanMsg = receive(laserSub); scan = lidarScan(scanMsg);
-                            offsetcounter = offsetcounter + turningFactor;
-                            disp(offsetcounter);
-                         end
-                        rotateDegree2(90*turningFactor,0.3*turningFactor,false,odomSub,velPub);
-                     end
-                else
-                    stillInFrontFlag = true;
-                end
-            end
-        end
-    end
+	move(0.2,0,velPub);
+	scanMsg = receive(laserSub); scan = lidarScan(scanMsg);
+	objectAvoided = avoidObject(laserSub,odomSub,velPub,scan);
 end
