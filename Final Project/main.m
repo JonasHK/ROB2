@@ -5,10 +5,10 @@ Map_pixel_m_resolution = (2445-8)/53.5;
 margin = 0.30;
 monteCarlCounter = 0;
 % Destinations
-A = [6.5,23.4] %[46, 27.5];
+A = [46, 27.5]; %[46, 27.5]; [6.5,23.4];
 B = [2, 9];
-C = [40, 40];
-establishConnection('0.11', '0.19');
+C = [26, 3];%[40, 40];
+establishConnection('1.164', '1.145');
 % Making objects for subscribing and publishing the topics
 odom = rossubscriber('/odom');
 resetOdometry = rospublisher('/mobile_base/commands/reset_odometry');
@@ -50,11 +50,17 @@ map_without_dilate = binaryOccupancyMap(im_binary,Map_pixel_m_resolution);
 %figure(), show(map)
 %% Matlab PRM - better than Corke
 close all
-prmComplex = mobileRobotPRM(map,350);
+tic
+prmComplex = mobileRobotPRM(map,500);
 %show(prmComplex)
-path = findpath(prmComplex,A,B);
+path1 = findpath(prmComplex,A,B);
 figure(10)
 show(prmComplex)
+path2 = findpath(prmComplex,B,C);
+figure(11)
+show(prmComplex)
+toc
+
 %% PRM - Corke
 %Add probabilistic roadmapping
 % figure
@@ -115,12 +121,11 @@ amcl.InitialCovariance = eye(3)*0.5;
 visualizationHelper = ExampleHelperAMCLVisualization(map_without_dilate); % Start a figure for amcl to print points in. PlotStep() later.
 %wanderHelper = ExampleHelperAMCLWanderer(laserSub, sensorTransform, velPub, velMsg);
 %% Pure persuit
-controller = controllerPurePursuit('DesiredLinearVelocity',0.3,'LookaheadDistance',0.4,'MaxAngularVelocity',2,'Waypoints',path);
+controller = controllerPurePursuit('DesiredLinearVelocity',0.5,'LookaheadDistance',0.6,'MaxAngularVelocity',2,'Waypoints',path1);
 amcl = monteCarloInit(map_without_dilate);
 visualizationHelper = ExampleHelperAMCLVisualization(map_without_dilate); % Start a figure for amcl to print points in. PlotStep() later.
 %amcl.InitialPose = ExampleHelperAMCLGazeboTruePose;
-i = 0;
-% Instantiate vector field histograms
+i = 0; % Instantiate vector field histograms
 
 % Set goal radius
 goalRadius = 0.1;
@@ -129,7 +134,6 @@ robotGoal = B;
 distanceToGoal = norm(robotInitialLocation - robotGoal);
 
 while(distanceToGoal > goalRadius)
-    
     % Receive laser scan and odometry message.
     scanMsg = receive(laserSub);
     odompose = odomSub.LatestMessage;
@@ -150,16 +154,15 @@ while(distanceToGoal > goalRadius)
     [isUpdated,estimatedPose, estimatedCovariance] = amcl(pose, scan);
 	
 	% Scanning and avoiding objects
-	
 	objectAvoided = avoidObject(laserSub,odomSub,velPub,scan);
-	if(~objectAvoided)
+
+    if(~objectAvoided)
 		monteCarlCounter = monteCarlCounter + 1;
 	else
 		%Starts a new montocarlo
 		amcl = monteCarloInit(map_without_dilate);
 		monteCarlCounter = 0;
-	end
-	
+    end
     % Calculation distance to goal
     %distanceToGoal1 = norm([pose.Position.X;pose.Position.Y]-B);
     % Asking controller 1 for linear velocity and angular velocity
@@ -183,10 +186,10 @@ while(distanceToGoal > goalRadius)
          plotStep(visualizationHelper, amcl, estimatedPose, scan, i)
 	end
 	
-	distanceToGoal = norm(robotInitialLocation - robotGoal);
+	distanceToGoal = norm([estimatedPose(1), estimatedPose(2)] - robotGoal);
 end
-
-%% Find first green circle
+disp("Destination B reached")
+% Find first green circle
 spinToLocateGreenCircle(12, imSub, odomSub, velPub);
 
 allignGreenCircle(12, 3, imSub, odomSub, velPub);
@@ -197,28 +200,86 @@ allignGreenCircle(4, 1, imSub, odomSub, velPub);
 
 allignToWall(laserSub, odomSub, velPub);
 
+rotateDegree2(180,1,false,odomSub,velPub)
+disp("Circel reached")
 
-% %% Pure persuit
-% controller = controllerPurePursuit('DesiredLinearVelocity',0.5,'LookaheadDistance',0.4,'MaxAngularVelocity',2,'Waypoints',path);
-% amcl.InitialPose = ExampleHelperAMCLGazeboTruePose 
-% while(1)
-%      % Position update
-%         pose = getPose(odom);
-%         % Convert orientation
-%         quat = pose.Orientation;
-%         angles = quat2eul([quat.W quat.X quat.Y quat.Z]);
-%         % Calculation distance to goal
-%         distanceToGoal1 = norm([pose.Position.X;pose.Position.Y]-B);
-%         % Asking controller 1 for linear velocity and angular velocity
-%         [vel,ang_vel] = controller([pose.Position.X + amcl.InitialPose(1), pose.Position.Y + amcl.InitialPose(2), angles(1) + amcl.InitialPose(3)]);
-%         % Tells the robot to move
-%         %disp(angles)
-%         move(vel,ang_vel,robot);
-%         % Logging data and incrementing index
-%         logarray(index,1) = pose.Position.X + amcl.InitialPose(1);
-%         logarray(index,2) = pose.Position.Y + amcl.InitialPose(2);
-%         index = index + 1
-% end
+% From B to C
+controller.Waypoints = path2;
+amcl = monteCarloInit(map_without_dilate);
+
+robotInitialLocation = [amcl.InitialPose(1), amcl.InitialPose(2)];
+robotGoal = C;
+distanceToGoal = norm(robotInitialLocation - robotGoal);
+
+while(distanceToGoal > goalRadius)
+    % Receive laser scan and odometry message.
+    scanMsg = receive(laserSub);
+    odompose = odomSub.LatestMessage;
+    % Create lidarScan object to pass to the AMCL object.
+    scan = lidarScan(scanMsg);
+    
+    
+    % Compute robot's pose [x,y,yaw] from odometry message.
+    odomQuat = [odompose.Pose.Pose.Orientation.W, odompose.Pose.Pose.Orientation.X, ...
+        odompose.Pose.Pose.Orientation.Y, odompose.Pose.Pose.Orientation.Z];
+    odomRotation = quat2eul(odomQuat);
+  
+
+    
+    pose = [odompose.Pose.Pose.Position.X + amcl.InitialPose(1), odompose.Pose.Pose.Position.Y + amcl.InitialPose(2), odomRotation(1)];
+    % Update estimated robot's pose and covariance using new odometry and
+    % sensor readings.
+    [isUpdated,estimatedPose, estimatedCovariance] = amcl(pose, scan);
+	
+	% Scanning and avoiding objects
+	objectAvoided = avoidObject(laserSub,odomSub,velPub,scan);
+
+    if(~objectAvoided)
+		monteCarlCounter = monteCarlCounter + 1;
+	else
+		%Starts a new montocarlo
+		amcl = monteCarloInit(map_without_dilate);
+		monteCarlCounter = 0;
+    end
+    % Calculation distance to goal
+    %distanceToGoal1 = norm([pose.Position.X;pose.Position.Y]-B);
+    % Asking controller 1 for linear velocity and angular velocity
+    [vel,ang_vel] = controller([estimatedPose(1), estimatedPose(2), estimatedPose(3)]);
+    % Tells the robot to move
+    %disp(angles)
+    move(vel,ang_vel,velPub);
+    % Logging data and incrementing index
+    logarray(index,1) = estimatedPose(1)-odompose.Pose.Pose.Position.X + amcl.InitialPose(1);
+    logarray(index,2) = estimatedPose(2)-odompose.Pose.Pose.Position.Y + amcl.InitialPose(2);
+    logarray(index,3) = estimatedPose(3)-odomRotation(1) + amcl.InitialPose(3);
+    index = index + 1;
+
+    
+    %disp (pose(1))
+    %pause(1)
+    
+    % Plot the robot's estimated pose, particles and laser scans on the map.
+	if (isUpdated && monteCarlCounter > 3)
+         i = i + 1;
+         plotStep(visualizationHelper, amcl, estimatedPose, scan, i)
+	end
+	
+	distanceToGoal = norm([estimatedPose(1), estimatedPose(2)] - robotGoal);
+end
+disp("Destination C reached")
+% Find first green circle
+spinToLocateGreenCircle(12, imSub, odomSub, velPub);
+
+allignGreenCircle(12, 3, imSub, odomSub, velPub);
+
+aoa = driveTowardsGreenCircle(laserSub, velPub, odomSub);
+
+allignGreenCircle(4, 1, imSub, odomSub, velPub);
+
+allignToWall(laserSub, odomSub, velPub);
+
+disp("Circel reached")
+
 %% % MOved it to a function
 
 while(1)

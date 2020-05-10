@@ -14,8 +14,8 @@ xcenter = x((c_idx-50):(c_idx+50));
 dcenter = d((c_idx-50):(c_idx+50));
 
 mdl = fitlm(xcenter,dcenter);
-coef = mdl.Coefficients.Estimate
-angleEst = atand(coef(2))
+coef = mdl.Coefficients.Estimate;
+angleEst = atand(coef(2));
 
 % Perpendicular distance to wall
 perpDist = cosd(angleEst)*dist;

@@ -16,8 +16,8 @@ dcenter = d((c_idx-50):(c_idx+50));
 % xleft = x(100:200)
 % dleft = d(100:200)
 mdl = fitlm(xcenter,dcenter);
-coef = mdl.Coefficients.Estimate
-angleEst = atand(coef(2))
+coef = mdl.Coefficients.Estimate;
+angleEst = atand(coef(2));
 
 if angleEst < 0
 	aoa = 1;
@@ -29,6 +29,6 @@ end
 perpDist = cosd(angleEst)*dist;
 
 % Distance to drive
-driveDist = ((perpDist-1)/perpDist)*dist
+driveDist = ((perpDist-1)/perpDist)*dist;
 
 moveRelative(driveDist, 0.2, velpub, odomsub)

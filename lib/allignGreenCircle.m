@@ -2,7 +2,7 @@ function [] = allignGreenCircle(Tolerance, angVel, imsub, odomsub, velpub)
 
 % Turn toward the green circle
 
-[imCenter, circleCenter, ~] = findGreenCircle(imsub)
+[imCenter, circleCenter, ~] = findGreenCircle(imsub);
 
 while or(circleCenter >= imCenter + Tolerance...
            , circleCenter <= imCenter - Tolerance)
@@ -16,7 +16,7 @@ while or(circleCenter >= imCenter + Tolerance...
         end
 
         close all
-        [imCenter, circleCenter, ~] = findGreenCircle(imsub)
+        [imCenter, circleCenter, ~] = findGreenCircle(imsub);
 end
 
 %hold on
